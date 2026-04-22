@@ -4,6 +4,8 @@
 
 Ce projet implémente une architecture *API-driven* dans laquelle de simples requêtes HTTP permettent de **démarrer, arrêter ou superviser** une instance EC2, sans jamais passer par une console graphique AWS. Tout est piloté par API, avec un endpoint REST dédié pour chaque action.
 
+**⚡ Déploiement automatique** : un seul clic sur "Create codespace" suffit pour avoir toute l'infrastructure déployée et fonctionnelle en 3 minutes.
+
 ---
 
 ## 🎯 Objectif pédagogique
@@ -14,209 +16,77 @@ Comprendre comment des services cloud *serverless* (API Gateway + Lambda) peuven
 - Développer et déployer une fonction Lambda
 - Exposer cette Lambda derrière une API REST (API Gateway) avec plusieurs routes
 - Piloter le tout uniquement via des appels HTTP
+- Automatiser la reproductibilité d'un environnement cloud avec un devcontainer
 
 ---
 
 ## 🏗️ Architecture
-
-```
-                                         POST /ec2/start
+                                     POST /ec2/start
 ┌─────────────┐         HTTP              POST /ec2/stop         ┌──────────┐     ┌─────────┐
 │  Client     │ ────────────────────► ┌──────────────────┐ ────► │  Lambda  │ ──► │   EC2   │
 │ (curl/Web)  │       POST /ec2/…     │   API Gateway    │       │ ec2-ctrl │     │ i-xxxx  │
 └─────────────┘                       │      /dev        │       └──────────┘     └─────────┘
-                                      └──────────────────┘
-                                      │
-                                      │ route  →  action
-                                      │ /start →  start_instances
-                                      │ /stop  →  stop_instances
-                                      │ /status→  describe_instances
-                                      │
-                                      └─────── LocalStack (AWS émulé) ──────
-                                                      │
-                                          GitHub Codespaces (port 4566)
-```
-
-Le flux complet d'une requête :
-
-1. Le client envoie une requête `POST` sur l'une des routes (`/ec2/start`, `/ec2/stop`, `/ec2/status`) avec un body JSON contenant l'`instance_id`
-2. API Gateway reçoit la requête et invoque la Lambda en mode *proxy*
-3. La Lambda lit l'**action dans le chemin de l'URL** puis appelle l'API EC2 via `boto3`
-4. EC2 exécute l'action et retourne son état
-5. La réponse JSON remonte jusqu'au client
+└──────────────────┘
+│
+│ route  →  action
+│ /start →  start_instances
+│ /stop  →  stop_instances
+│ /status→  describe_instances
+│
+└─────── LocalStack (AWS émulé) ──────
+│
+GitHub Codespaces (port 4566)
 
 ---
 
-## 📋 Prérequis
+## 🚀 Démarrage rapide (recommandé)
 
-- Un compte **GitHub** avec accès à **Codespaces**
-- Un compte **LocalStack** gratuit ([app.localstack.cloud](https://app.localstack.cloud)) pour récupérer un `AUTH_TOKEN`
-- Connaissances de base en ligne de commande
+Tout est automatisé grâce à un **devcontainer** qui configure l'environnement au démarrage du Codespace.
 
----
+### Prérequis
 
-## ⚙️ Installation
+Un compte **LocalStack** gratuit ([app.localstack.cloud](https://app.localstack.cloud)) pour récupérer un token d'authentification.
 
-### Étape 1 — Créer le Codespace
+### Étape 1 — Ajouter ton token LocalStack en secret Codespace
 
-1. Ouvrir le dépôt GitHub du projet
-2. Cliquer sur **Code → Codespaces → Create codespace on main**
-3. Attendre le démarrage du conteneur
+1. Va sur **https://github.com/settings/codespaces**
+2. Clique **New secret**
+3. **Name** : `LOCALSTACK_AUTH_TOKEN`
+4. **Value** : ton token LocalStack
+5. **Repository access** : sélectionne `API_Driven`
+6. **Add secret**
 
-### Étape 2 — Installer LocalStack
+### Étape 2 — Créer le Codespace
 
-Dans le terminal du Codespace :
+1. Sur la page du repo, clique **Code → Codespaces → Create codespace on main**
+2. Attends 2-3 minutes pendant que le devcontainer s'installe
 
-```bash
-# Créer un environnement virtuel Python
-python3 -m venv ~/rep_localstack
-source ~/rep_localstack/bin/activate
+### Étape 3 — Rendre le port 4566 public
 
-# Installer LocalStack
-pip install --upgrade pip
-pip install localstack
+Dans le Codespace, onglet **PORTS** → clic droit sur **4566** → **Port Visibility** → **Public**.
 
-# Authentifier LocalStack (remplacer par votre token)
-localstack auth set-token VOTRE_TOKEN_LOCALSTACK
+⚠️ Cette étape manuelle est nécessaire car GitHub impose une confirmation explicite pour ouvrir un port à l'extérieur.
 
-# Démarrer LocalStack en arrière-plan
-localstack start -d
+### ✅ C'est tout
 
-# Vérifier que ça tourne
-localstack status services
-```
+Le script `setup.sh` a automatiquement :
+- Installé LocalStack et AWS CLI
+- Démarré LocalStack
+- Créé une instance EC2
+- Déployé la Lambda `ec2-controller`
+- Créé l'API Gateway avec 3 routes
 
-💡 **Astuce** : pour un Codespace, stocker le token comme *GitHub Codespaces Secret* (`LOCALSTACK_AUTH_TOKEN`) évite de l'écrire en clair.
-
-### Étape 3 — Installer les outils AWS CLI
+Les IDs générés (instance + API) et les URLs prêtes à l'emploi sont affichés dans le terminal et sauvegardés dans `~/.api-info.txt`.
 
 ```bash
-pip install awscli awscli-local
-aws configure
-# AWS Access Key ID: test
-# AWS Secret Access Key: test
-# Default region: us-east-1
-# Default output format: json
-```
-
-Le wrapper `awslocal` permet d'appeler l'AWS CLI directement sur LocalStack, sans avoir à préciser `--endpoint-url` à chaque commande.
-
-### Étape 4 — Rendre le port 4566 public
-
-Dans le Codespace :
-
-1. Ouvrir l'onglet **PORTS**
-2. Repérer le port **4566** (endpoint LocalStack)
-3. Clic droit → **Port Visibility → Public**
-4. Noter l'URL forwardée (format : `https://<codespace>-4566.app.github.dev`)
-
----
-
-## 🧱 Déploiement de la solution
-
-### 1. Créer l'instance EC2
-
-```bash
-awslocal ec2 create-key-pair --key-name demo-key
-
-awslocal ec2 run-instances \
-  --image-id ami-12345678 \
-  --instance-type t2.micro \
-  --key-name demo-key \
-  --count 1
-```
-
-Récupérer l'`InstanceId` retourné (format `i-xxxxxxxx`) — il servira pour toutes les commandes suivantes.
-
-### 2. Créer la fonction Lambda
-
-Le fichier `lambda_function.py` contient le code de la Lambda. Elle lit l'**action dans le chemin** de l'URL (`/ec2/start`, `/ec2/stop`, `/ec2/status`) et appelle l'API EC2 correspondante via `boto3`.
-
-```bash
-# Zipper la fonction
-zip function.zip lambda_function.py
-
-# Déployer la Lambda
-awslocal lambda create-function \
-  --function-name ec2-controller \
-  --runtime python3.11 \
-  --handler lambda_function.lambda_handler \
-  --role arn:aws:iam::000000000000:role/lambda-role \
-  --zip-file fileb://function.zip
-
-# Attendre que la fonction soit active
-awslocal lambda get-function \
-  --function-name ec2-controller \
-  --query 'Configuration.State' --output text
-```
-
-⚠️ **Point clé** : la Lambda tourne dans son propre conteneur Docker. Pour qu'elle puisse atteindre LocalStack, on utilise la variable d'environnement `LOCALSTACK_HOSTNAME` (injectée automatiquement par LocalStack) au lieu de `localhost`.
-
-### 3. Créer l'API Gateway avec 3 routes
-
-On crée une API REST avec une ressource `/ec2` parente et trois sous-ressources : `/start`, `/stop`, `/status`.
-
-```bash
-# 1. Créer l'API
-API_ID=$(awslocal apigateway create-rest-api --name 'ec2-api' --query 'id' --output text)
-
-# 2. Récupérer la ressource racine "/"
-ROOT_ID=$(awslocal apigateway get-resources --rest-api-id $API_ID \
-  --query 'items[?path==`/`].id' --output text)
-
-# 3. Créer la ressource /ec2 (parent commun)
-EC2_RESOURCE_ID=$(awslocal apigateway create-resource \
-  --rest-api-id $API_ID \
-  --parent-id $ROOT_ID \
-  --path-part ec2 \
-  --query 'id' --output text)
-
-# 4. Fonction qui crée une sous-ressource + méthode POST + intégration Lambda
-create_action() {
-  local ACTION=$1
-  local RES_ID=$(awslocal apigateway create-resource \
-    --rest-api-id $API_ID \
-    --parent-id $EC2_RESOURCE_ID \
-    --path-part $ACTION \
-    --query 'id' --output text)
-
-  awslocal apigateway put-method \
-    --rest-api-id $API_ID \
-    --resource-id $RES_ID \
-    --http-method POST \
-    --authorization-type NONE > /dev/null
-
-  awslocal apigateway put-integration \
-    --rest-api-id $API_ID \
-    --resource-id $RES_ID \
-    --http-method POST \
-    --type AWS_PROXY \
-    --integration-http-method POST \
-    --uri arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:ec2-controller/invocations > /dev/null
-
-  echo "  ✓ /ec2/$ACTION créé"
-}
-
-# 5. Créer les 3 routes
-create_action start
-create_action stop
-create_action status
-
-# 6. Déployer sur le stage "dev"
-awslocal apigateway create-deployment \
-  --rest-api-id $API_ID \
-  --stage-name dev
-
-echo "API déployée — API_ID = $API_ID"
+cat ~/.api-info.txt
 ```
 
 ---
 
 ## 🎮 Utilisation de l'API
 
-### Routes disponibles
-
-Toutes les routes acceptent une méthode **POST** avec le header `Content-Type: application/json` et un body JSON contenant l'`instance_id`.
+Toutes les routes utilisent la méthode **POST** avec un body JSON contenant `instance_id`.
 
 | Action | Route | Description |
 |--------|-------|-------------|
@@ -226,17 +96,13 @@ Toutes les routes acceptent une méthode **POST** avec le header `Content-Type: 
 
 ### Format de l'URL
 
-**En local depuis le Codespace** :
-```
-http://localhost:4566/restapis/<API_ID>/dev/_user_request_/ec2/<action>
-```
+**Depuis le Codespace (local)** :
+http://localhost:4566/restapis/<API_ID>/dev/user_request/ec2/<action>
 
 **Depuis l'extérieur (URL publique)** :
-```
-https://<codespace>-4566.app.github.dev/restapis/<API_ID>/dev/_user_request_/ec2/<action>
-```
+https://<codespace>-4566.app.github.dev/restapis/<API_ID>/dev/user_request/ec2/<action>
 
-### Body JSON (identique pour les 3 actions)
+### Body JSON
 
 ```json
 {
@@ -244,65 +110,56 @@ https://<codespace>-4566.app.github.dev/restapis/<API_ID>/dev/_user_request_/ec2
 }
 ```
 
-### Exemples d'utilisation avec curl
-
-#### ▶️ Démarrer une instance
+### Exemples avec curl
 
 ```bash
+# ▶️ DÉMARRER
 curl -X POST \
   "https://<codespace>-4566.app.github.dev/restapis/<API_ID>/dev/_user_request_/ec2/start" \
   -H 'Content-Type: application/json' \
-  -d '{"instance_id":"i-77aa6b6abec2187ab"}'
-```
+  -d '{"instance_id":"i-xxxxxxxx"}'
 
-#### ⏹️ Arrêter une instance
-
-```bash
+# ⏹️ ARRÊTER
 curl -X POST \
   "https://<codespace>-4566.app.github.dev/restapis/<API_ID>/dev/_user_request_/ec2/stop" \
   -H 'Content-Type: application/json' \
-  -d '{"instance_id":"i-77aa6b6abec2187ab"}'
-```
+  -d '{"instance_id":"i-xxxxxxxx"}'
 
-#### 🔍 Consulter l'état d'une instance
-
-```bash
+# 🔍 STATUS
 curl -X POST \
   "https://<codespace>-4566.app.github.dev/restapis/<API_ID>/dev/_user_request_/ec2/status" \
   -H 'Content-Type: application/json' \
-  -d '{"instance_id":"i-77aa6b6abec2187ab"}'
+  -d '{"instance_id":"i-xxxxxxxx"}'
 ```
 
-### Exemple de réponse (action `start`)
+### Exemple de réponse (`start`)
 
 ```json
 {
   "action": "start",
-  "instance_id": "i-77aa6b6abec2187ab",
+  "instance_id": "i-aa669a690a6ce1cdd",
   "result": {
-    "StartingInstances": [
-      {
-        "InstanceId": "i-77aa6b6abec2187ab",
-        "CurrentState": { "Code": 0, "Name": "pending" },
-        "PreviousState": { "Code": 80, "Name": "stopped" }
-      }
-    ]
+    "StartingInstances": [{
+      "InstanceId": "i-aa669a690a6ce1cdd",
+      "CurrentState": { "Code": 0, "Name": "pending" },
+      "PreviousState": { "Code": 80, "Name": "stopped" }
+    }]
   }
 }
 ```
 
 ### Utilisation via Postman / Insomnia
 
-- **Méthode** : `POST`
-- **URL** : une des trois routes ci-dessus
+- **Method** : `POST`
+- **URL** : une des trois routes
 - **Headers** : `Content-Type: application/json`
 - **Body** (raw JSON) : `{"instance_id":"i-xxxxxxxx"}`
 
 ---
 
-## ✅ Vérification du fonctionnement
+## ✅ Vérification
 
-### Vérifier l'état d'une instance en CLI
+### Lister les instances et leur état
 
 ```bash
 awslocal ec2 describe-instances \
@@ -313,24 +170,129 @@ awslocal ec2 describe-instances \
 ### Cycle de test complet
 
 ```bash
-# 1. Instance en marche ?
+# 1. État initial
 curl -s -X POST \
   "http://localhost:4566/restapis/$API_ID/dev/_user_request_/ec2/status" \
   -H 'Content-Type: application/json' \
-  -d '{"instance_id":"i-xxxx"}' | python3 -m json.tool
+  -d "{\"instance_id\":\"$INSTANCE_ID\"}" | python3 -m json.tool
 
-# 2. On l'arrête
+# 2. Stop
 curl -X POST \
   "http://localhost:4566/restapis/$API_ID/dev/_user_request_/ec2/stop" \
   -H 'Content-Type: application/json' \
-  -d '{"instance_id":"i-xxxx"}'
+  -d "{\"instance_id\":\"$INSTANCE_ID\"}"
 
-# 3. On la redémarre
+# 3. Start
 curl -X POST \
   "http://localhost:4566/restapis/$API_ID/dev/_user_request_/ec2/start" \
   -H 'Content-Type: application/json' \
-  -d '{"instance_id":"i-xxxx"}'
+  -d "{\"instance_id\":\"$INSTANCE_ID\"}"
 ```
+
+---
+
+## 🛠️ Déploiement manuel (alternative)
+
+Si tu préfères comprendre chaque étape plutôt qu'utiliser le devcontainer, voici les commandes manuelles.
+
+<details>
+<summary>Cliquer pour déplier le détail</summary>
+
+### Installer LocalStack
+
+```bash
+python3 -m venv ~/rep_localstack
+source ~/rep_localstack/bin/activate
+pip install --upgrade pip localstack awscli awscli-local
+localstack auth set-token VOTRE_TOKEN
+localstack start -d
+```
+
+### Configurer AWS CLI
+
+```bash
+aws configure
+# Access Key / Secret Key : test / test
+# Region : us-east-1 | Format : json
+```
+
+### Créer l'instance EC2
+
+```bash
+awslocal ec2 create-key-pair --key-name demo-key
+awslocal ec2 run-instances \
+  --image-id ami-12345678 \
+  --instance-type t2.micro \
+  --key-name demo-key \
+  --count 1
+```
+
+### Déployer la Lambda
+
+```bash
+zip function.zip lambda_function.py
+awslocal lambda create-function \
+  --function-name ec2-controller \
+  --runtime python3.11 \
+  --handler lambda_function.lambda_handler \
+  --role arn:aws:iam::000000000000:role/lambda-role \
+  --zip-file fileb://function.zip
+```
+
+### Créer l'API Gateway avec 3 routes
+
+```bash
+API_ID=$(awslocal apigateway create-rest-api --name 'ec2-api' --query 'id' --output text)
+ROOT_ID=$(awslocal apigateway get-resources --rest-api-id $API_ID \
+  --query 'items[?path==`/`].id' --output text)
+EC2_RESOURCE_ID=$(awslocal apigateway create-resource \
+  --rest-api-id $API_ID --parent-id $ROOT_ID \
+  --path-part ec2 --query 'id' --output text)
+
+for ACTION in start stop status; do
+  RES=$(awslocal apigateway create-resource \
+    --rest-api-id $API_ID --parent-id $EC2_RESOURCE_ID \
+    --path-part $ACTION --query 'id' --output text)
+  awslocal apigateway put-method --rest-api-id $API_ID --resource-id $RES \
+    --http-method POST --authorization-type NONE
+  awslocal apigateway put-integration --rest-api-id $API_ID --resource-id $RES \
+    --http-method POST --type AWS_PROXY --integration-http-method POST \
+    --uri arn:aws:apigateway:us-east-1:lambda:path/2015-03-31/functions/arn:aws:lambda:us-east-1:000000000000:function:ec2-controller/invocations
+done
+
+awslocal apigateway create-deployment --rest-api-id $API_ID --stage-name dev
+```
+
+</details>
+
+---
+
+## 📁 Structure du projet
+.
+├── .devcontainer/
+│   ├── devcontainer.json     # Config Codespace (image, features, hooks)
+│   └── setup.sh              # Script d'installation automatique
+├── lambda_function.py        # Code de la fonction Lambda
+├── README.md                 # Ce fichier
+└── .gitignore
+
+### Le fichier `devcontainer.json`
+
+Configure l'environnement du Codespace :
+- Image Python 3.11 Debian
+- Feature `docker-in-docker` (LocalStack a besoin de Docker)
+- Port 4566 forwardé
+- Script `setup.sh` lancé après création
+- Récupère le token LocalStack depuis le secret Codespace
+
+### Le script `setup.sh`
+
+Enchaîne automatiquement :
+1. Installation LocalStack + AWS CLI
+2. Configuration AWS CLI (credentials factices)
+3. Authentification et démarrage LocalStack
+4. Déploiement de la Lambda
+5. Création EC2 + API Gateway
 
 ---
 
@@ -338,21 +300,23 @@ curl -X POST \
 
 | Problème | Cause probable | Solution |
 |---|---|---|
-| `License activation failed` au démarrage de LocalStack | Token LocalStack absent | `localstack auth set-token <token>` |
-| `Unknown options: --cli-binary-format` | AWS CLI v1 (vs v2) | Retirer l'option, non nécessaire en v1 |
-| `502 Bad Gateway` sur l'appel curl | Lambda pas encore `Active` | `awslocal lambda get-function --function-name ec2-controller --query 'Configuration.State'` |
-| Lambda renvoie `connection refused` | `localhost` utilisé au lieu de `LOCALSTACK_HOSTNAME` | Vérifier la construction de l'endpoint dans la Lambda |
-| Page de login GitHub sur l'URL publique | Port non entièrement public | Onglet PORTS → clic droit sur 4566 → Port Visibility → Public |
-| `InvalidInstanceID.NotFound` | LocalStack a été redémarré | Recréer une instance avec `run-instances` |
-| Route `/ec2/start` renvoie `Missing Authentication Token` | Route oubliée lors du déploiement | Relancer `create-deployment` après avoir créé les routes |
+| `License activation failed` au démarrage | Token LocalStack absent | Vérifier le secret `LOCALSTACK_AUTH_TOKEN` dans https://github.com/settings/codespaces |
+| `HTTP/2 401` + `www-authenticate: tunnel` en externe | Port 4566 non public | Onglet PORTS → clic droit → Port Visibility → Public |
+| `Unknown options: --cli-binary-format` | AWS CLI v1 | Retirer l'option, non nécessaire en v1 |
+| `502 Bad Gateway` | Lambda pas encore `Active` | Attendre quelques secondes, vérifier avec `awslocal lambda get-function` |
+| Lambda `connection refused` | `localhost` utilisé au lieu de `LOCALSTACK_HOSTNAME` | Vérifier la construction de l'endpoint dans la Lambda |
+| `InvalidInstanceID.NotFound` | LocalStack a redémarré | Recréer une instance avec `run-instances` |
+| `Missing Authentication Token` | Route oubliée lors du déploiement | Relancer `create-deployment` après création des routes |
+| Devcontainer échoue sur `docker-in-docker` | Moby incompatible Debian Trixie | `devcontainer.json` doit avoir `"moby": false` |
+| Codespace `API_Driven` ne démarre pas | Codespace précédent crashé | Supprimer dans https://github.com/codespaces et recréer |
 
-### Consulter les logs de la Lambda
+### Logs Lambda
 
 ```bash
 awslocal logs tail /aws/lambda/ec2-controller --follow
 ```
 
-### Mettre à jour le code de la Lambda après modification
+### Mettre à jour le code Lambda
 
 ```bash
 zip function.zip lambda_function.py
@@ -361,40 +325,41 @@ awslocal lambda update-function-code \
   --zip-file fileb://function.zip
 ```
 
+### Retrouver les IDs générés
+
+```bash
+cat ~/.api-info.txt
+awslocal ec2 describe-instances --query 'Reservations[*].Instances[*].[InstanceId,State.Name]' --output table
+awslocal apigateway get-rest-apis --query 'items[*].[id,name]' --output table
+```
+
 ---
 
-## 📁 Structure du projet
+## 🔒 Sécurité
 
-```
-.
-├── README.md                  # Ce fichier
-├── lambda_function.py         # Code de la fonction Lambda
-├── function.zip               # Archive pour déploiement Lambda
-└── setup.sh                   # (optionnel) Script d'installation automatisé
-```
+- Le token LocalStack **n'est jamais dans le repo** : il est stocké dans les Codespace Secrets GitHub (chiffrés côté serveur)
+- Le `devcontainer.json` utilise `${localEnv:LOCALSTACK_AUTH_TOKEN}` pour injecter la valeur à l'exécution
+- Chaque utilisateur du template doit fournir **son propre** token
 
 ---
 
 ## 🚀 Pour aller plus loin
 
-- **Remplacer EC2 par Docker** : modifier la Lambda pour piloter des conteneurs Docker (via la lib `docker-py`) au lieu d'instances EC2 — plus réaliste car Docker tourne vraiment.
-- **Ajouter une route `GET /ec2/list`** : lister toutes les instances et leur état.
-- **Sécuriser l'API** : passer en `AWS_IAM` ou utiliser des API keys (`x-api-key`).
-- **Gérer plusieurs instances** : accepter une liste `instance_ids` pour agir en batch.
-- **Ajouter un monitoring** : stocker l'historique des actions dans une table DynamoDB.
-- **Infrastructure as Code** : refaire tout ça avec Terraform ou AWS CDK pour automatiser le déploiement.
+- **Remplacer EC2 par Docker** : modifier la Lambda pour piloter des conteneurs Docker (via `docker-py`)
+- **Ajouter une route `GET /ec2/list`** : lister toutes les instances
+- **Sécuriser l'API** : passer en `AWS_IAM` ou utiliser des API keys
+- **Gérer plusieurs instances** en batch
+- **Ajouter un monitoring** DynamoDB pour l'historique des actions
+- **Infrastructure as Code** : refaire le déploiement en Terraform ou AWS CDK
 
 ---
 
-## 📚 Ressources utiles
+## 📚 Ressources
 
 - [Documentation LocalStack](https://docs.localstack.cloud/)
-- [AWS Lambda avec Python](https://docs.aws.amazon.com/lambda/latest/dg/python-handler.html)
+- [AWS Lambda Python](https://docs.aws.amazon.com/lambda/latest/dg/python-handler.html)
 - [API Gateway — intégration Lambda proxy](https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-create-api-as-simple-proxy-for-lambda.html)
+- [GitHub Codespaces — Devcontainers](https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/introduction-to-dev-containers)
 - [awslocal (AWS CLI wrapper)](https://github.com/localstack/awscli-local)
 
 ---
-
-## 📝 Auteur
-
-Atelier réalisé dans le cadre du TD **API-Driven Infrastructure**.
