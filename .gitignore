@@ -1,0 +1,6 @@
+function.zip
+response.json
+rep_localstack/
+__pycache__/
+*.pyc
+.env
