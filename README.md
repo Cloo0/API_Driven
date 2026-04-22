@@ -100,7 +100,7 @@ Toutes les routes utilisent la méthode **POST** avec un body JSON contenant `in
 http://localhost:4566/restapis/<API_ID>/dev/user_request/ec2/<action>
 
 **Depuis l'extérieur (URL publique)** :
-https://<codespace>-4566.app.github.dev/restapis/<API_ID>/dev/user_request/ec2/<action>
+https://[codespace]-4566.app.github.dev/restapis/<API_ID>/dev/user_request/ec2/<action>
 
 ### Body JSON
 
@@ -193,7 +193,7 @@ curl -X POST \
 
 ## 🛠️ Déploiement manuel (alternative)
 
-Si tu préfères comprendre chaque étape plutôt qu'utiliser le devcontainer, voici les commandes manuelles.
+Pour comprendre chaque étape plutôt qu'utiliser le devcontainer, voici les commandes manuelles.
 
 <details>
 <summary>Cliquer pour déplier le détail</summary>
